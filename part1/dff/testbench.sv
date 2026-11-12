@@ -14,6 +14,15 @@ module testbench
    
    wire        clk_i;
    wire        reset_i;
+   wire genarated_reset; 
+   logic test_reset = 0;
+   assign reset_i = genarated_reset  | test_reset;
+
+   logic d_i = 0, en_i = 0;
+   wire q_o;  
+
+   logic expected = 0;
+   bit initialized = 0;
 
    nonsynth_clock_gen
      #(.cycle_time_p(10))
@@ -25,7 +34,7 @@ module testbench
       ,.reset_cycles_hi_p(10))
    rg
      (.clk_i(clk_i)
-     ,.async_reset_o(reset_i));
+     ,.async_reset_o(genarated_reset));
 
    dff
      #()
@@ -33,7 +42,40 @@ module testbench
      (.clk_i(clk_i)
      ,.reset_i(reset_i)
      // Declare the other ports.
-     );
+     ,.d_i(d_i)
+     ,.en_i(en_i)
+     ,.q_o(q_o));
+
+   task automatic check(input logic correct, input string label_text);
+      error = correct !== 1'b1;
+      $display("%t %s: %s", $time, label_text, error ? "FAIL" : "PASS");
+      if (error) begin
+         `FINISH_WITH_FAIL;
+      end
+   endtask
+
+   task automatic step(input bit rst, input bit en, input bit data);
+      @(negedge clk_i);
+      #2;
+
+      test_reset = rst;
+      en_i = en;
+      d_i = data;
+      #2;
+
+      if (initialized && !rst)
+         check(q_o === expected, "DFF holds before positive edge");
+      @(posedge clk_i);
+      if (rst) expected = 0;
+      else if (en) expected = data;
+      #2;
+      
+      $display("reset=%b en=%b d=%b expected=%b actual=%b",
+               rst, en, data, expected, q_o);
+      check(q_o === expected, "DFF state");
+      initialized = 1;
+
+   endtask
 
    initial begin
       // Call this to set pass_o and error_o to 0.
@@ -42,12 +84,22 @@ module testbench
       // Put your testbench code here. Print all of the test cases and
       // their correctness.
 
+      @(negedge reset_i);
+
+      step(1, 1, 1);
+
+      for (int state_value = 0;  state_value < 2; state_value++)
+         for (int inputs = 0; inputs < 8; inputs++) begin 
+            step(0, 1,  1'(state_value));
+            step(1'(inputs >> 2),  1'(inputs >> 1), 1'(inputs));
+         end
+
 
 
       // Use FINISH_WITH_FAIL to end the testbench and cause the FAIL message, and signal fail to cocotb
       // Use FINISH_WITH_PASS to end the testbench and cause the PASS message, and signal pass to cocotb
       // Calling neither will cause the UNKNOWN message, and cause issues in Cocotb.
-      `FINISH_WITH_FAIL;
+      `FINISH_WITH_PASS;
    end
 
    // This block executes after $finish() has been called.

@@ -14,6 +14,13 @@ module testbench
    
    wire        clk_i;
    wire        reset_i;
+   wire  genarated_reset;
+   logic test_reset = 0;
+   assign  reset_i = genarated_reset |  test_reset;
+   logic data_i = 0, en_i = 0;
+   wire [3:0]  data_o;
+   logic [3:0] expected = 0;
+   bit  initialized = 0;
 
    nonsynth_clock_gen
      #(.cycle_time_p(10))
@@ -25,7 +32,7 @@ module testbench
       ,.reset_cycles_hi_p(10))
    rg
      (.clk_i(clk_i)
-     ,.async_reset_o(reset_i));
+     ,.async_reset_o(genarated_reset));
 
    shift
      #()
@@ -33,7 +40,36 @@ module testbench
      (.clk_i(clk_i)
      ,.reset_i(reset_i)
      // Declare the other ports.
-     );
+     ,.data_i(data_i)
+     ,.en_i(en_i)
+     ,.data_o(data_o));
+
+   task automatic check(input logic correct, input string label_text);
+      error = correct !== 1'b1;
+      $display("%t %s: %s", $time, label_text, error ? "FAIL" : "PASS");
+      if (error) begin
+         `FINISH_WITH_FAIL;
+      end
+   endtask
+
+   task automatic step(input bit rst, input bit en, input bit data);
+      @(negedge clk_i);
+      #2;
+      test_reset = rst;
+      en_i = en;
+      data_i = data;
+      #2;
+      if (initialized && !rst)
+         check(data_o === expected, "shift holds before positive edge");
+      @(posedge clk_i);
+      if (rst) expected = 0;
+      else if (en) expected = {expected[2:0], data};
+      #2;
+      $display("reset=%b en=%b data=%b expected=%h actual=%h",
+               rst, en, data, expected, data_o);
+      check(data_o === expected, "shift state");
+      initialized = 1;
+   endtask
 
    initial begin
       // Call this to set pass_o and error_o to 0.
@@ -42,12 +78,28 @@ module testbench
       // Put your testbench code here. Print all of the test cases and
       // their correctness.
 
+      @(negedge reset_i);
+      step(1, 0, 1);
+
+      for (int pattern = 0; pattern < 16; pattern++) begin
+         for (int bit_index = 3; bit_index >= 0;  bit_index--)
+            step(0, 1, 1'(pattern >> bit_index));
+         step(0, 0, 0);
+         step(0, 0, 1);
+      end
+
+      step(1, 0, 1); 
+      repeat (4) step(0, 1, 1);
+
+      step(1, 1,  1);
+      step(0, 1, 0);
+
 
 
       // Use FINISH_WITH_FAIL to end the testbench and cause the FAIL message, and signal fail to cocotb
       // Use FINISH_WITH_PASS to end the testbench and cause the PASS message, and signal pass to cocotb
       // Calling neither will cause the UNKNOWN message, and cause issues in Cocotb.
-      `FINISH_WITH_FAIL;
+      `FINISH_WITH_PASS;
    end
 
    // This block executes after $finish() has been called.
